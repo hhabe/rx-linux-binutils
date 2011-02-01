@@ -1,0 +1,12 @@
+MACHINE=
+SCRIPT_NAME=elf
+OUTPUT_FORMAT="elf32-rx-linux"
+# See also `include/elf/rx.h'
+TEXT_START_ADDR=0x10000000
+ARCH=rx
+ENTRY=_start
+TEMPLATE_NAME=elf32
+EXTRA_EM_FILE=rxelf
+# EXTRA_EM_FILE=needrelax
+ELFSIZE=32
+MAXPAGESIZE=256

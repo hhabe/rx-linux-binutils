@@ -1218,7 +1218,7 @@ case "${targ}" in
     targ_selvecs="bfd_powerpcle_pei_vec bfd_powerpc_pei_vec bfd_powerpcle_pe_vec bfd_powerpc_pe_vec"
     ;;
 
-  rx-*-elf)
+  rx-*-elf | rx-*-linux*)
     targ_defvec=bfd_elf32_rx_le_vec
     targ_selvecs="bfd_elf32_rx_be_vec bfd_elf32_rx_le_vec"
     ;;
