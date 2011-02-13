@@ -1060,7 +1060,6 @@ i386_align_code (fragS *fragP, int count)
 	      else
 		patt = f32_patt;
 	      break;
-	    case PROCESSOR_PENTIUMPRO:
 	    case PROCESSOR_PENTIUM4:
 	    case PROCESSOR_NOCONA:
 	    case PROCESSOR_CORE:
@@ -1080,6 +1079,7 @@ i386_align_code (fragS *fragP, int count)
 	    case PROCESSOR_I386:
 	    case PROCESSOR_I486:
 	    case PROCESSOR_PENTIUM:
+	    case PROCESSOR_PENTIUMPRO:
 	    case PROCESSOR_GENERIC32:
 	      patt = f32_patt;
 	      break;
@@ -2176,6 +2176,7 @@ set_cpu_arch (int dummy ATTRIBUTE_UNUSED)
 		  else
 		    cpu_sub_arch_name = xstrdup (cpu_arch[j].name);
 		  cpu_arch_flags = flags;
+		  cpu_arch_isa_flags = flags;
 		}
 	      *input_line_pointer = e;
 	      demand_empty_rest_of_line ();
@@ -8343,6 +8344,7 @@ md_parse_option (int c, char *arg)
 		      else
 			cpu_sub_arch_name = xstrdup (cpu_arch[j].name);
 		      cpu_arch_flags = flags;
+		      cpu_arch_isa_flags = flags;
 		    }
 		  break;
 		}

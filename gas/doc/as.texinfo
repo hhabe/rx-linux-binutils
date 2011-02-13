@@ -428,13 +428,18 @@ gcc(1), ld(1), and the Info entries for @file{binutils} and @file{ld}.
 @ifset PPC
 
 @emph{Target PowerPC options:}
-   [@b{-mpwrx}|@b{-mpwr2}|@b{-mpwr}|@b{-m601}|@b{-mppc}|@b{-mppc32}|@b{-m603}|@b{-m604}|
-    @b{-m403}|@b{-m405}|@b{-mppc64}|@b{-m620}|@b{-mppc64bridge}|@b{-mbooke}]
-   [@b{-mcom}|@b{-many}|@b{-maltivec}|@b{-mvsx}] [@b{-memb}]
+   [@b{-a32}|@b{-a64}]
+   [@b{-mpwrx}|@b{-mpwr2}|@b{-mpwr}|@b{-m601}|@b{-mppc}|@b{-mppc32}|@b{-m603}|@b{-m604}|@b{-m403}|@b{-m405}|
+    @b{-m440}|@b{-m464}|@b{-m476}|@b{-m7400}|@b{-m7410}|@b{-m7450}|@b{-m7455}|@b{-m750cl}|@b{-mppc64}|
+    @b{-m620}|@b{-me500}|@b{-e500x2}|@b{-me500mc}|@b{-me500mc64}|@b{-mppc64bridge}|@b{-mbooke}|
+    @b{-mpower4}|@b{-mpr4}|@b{-mpower5}|@b{-mpwr5}|@b{-mpwr5x}|@b{-mpower6}|@b{-mpwr6}|
+    @b{-mpower7}|@b{-mpw7}|@b{-ma2}|@b{-mcell}|@b{-mspe}|@b{-mtitan}|@b{-me300}|@b{-mcom}]
+   [@b{-many}] [@b{-maltivec}|@b{-mvsx}]
    [@b{-mregnames}|@b{-mno-regnames}]
-   [@b{-mrelocatable}|@b{-mrelocatable-lib}]
-   [@b{-mlittle}|@b{-mlittle-endian}|@b{-mbig}|@b{-mbig-endian}]
+   [@b{-mrelocatable}|@b{-mrelocatable-lib}|@b{-K PIC}] [@b{-memb}]
+   [@b{-mlittle}|@b{-mlittle-endian}|@b{-le}|@b{-mbig}|@b{-mbig-endian}|@b{-be}]
    [@b{-msolaris}|@b{-mno-solaris}]
+   [@b{-nops=@var{count}}]
 @end ifset
 @ifset RX
 
@@ -477,9 +482,9 @@ gcc(1), ld(1), and the Info entries for @file{binutils} and @file{ld}.
 @ifset TIC6X
 
 @emph{Target TIC6X options:}
-   [@b{-march=@var{arch}}] [@b{-matomic}|@b{-mno-atomic}]
-   [@b{-mbig-endian}|@b{-mlittle-endian}] [@b{-mdsbt}|@b{-mno-dsbt}]
-   [@b{-mpid=no}|@b{-mpid=near}|@b{-mpid=far}] [@b{-mpic}|@b{-mno-pic}]
+   [@b{-march=@var{arch}}] [@b{-mbig-endian}|@b{-mlittle-endian}]
+   [@b{-mdsbt}|@b{-mno-dsbt}] [@b{-mpid=no}|@b{-mpid=near}|@b{-mpid=far}]
+   [@b{-mpic}|@b{-mno-pic}]
 @end ifset
 
 @ifset XTENSA
@@ -766,6 +771,7 @@ ARM code in mind.
 Specify that PIC code has been generated.
 @end table
 @end ifset
+@c man end
 
 @ifset Blackfin
 
@@ -786,6 +792,7 @@ the Blackfin processor family.
 
 @end ifset
 
+@c man begin OPTIONS
 @ifset CRIS
 See the info pages for documentation of the CRIS-specific options.
 @end ifset
@@ -1283,6 +1290,27 @@ Assemble for a little endian target.
 See the info pages for documentation of the MMIX-specific options.
 @end ifset
 
+@c man end
+@ifset PPC
+
+@ifclear man
+@xref{PowerPC-Opts}, for the options available when @value{AS} is configured
+for a PowerPC processor.
+@end ifclear
+
+@ifset man
+@c man begin OPTIONS
+The following options are available when @value{AS} is configured for a
+PowerPC processor.
+@c man end
+@c man begin INCLUDE
+@include c-ppc.texi
+@c ended inside the included file
+@end ifset
+
+@end ifset
+
+@c man begin OPTIONS
 @ifset RX
 See the info pages for documentation of the RX-specific options.
 @end ifset

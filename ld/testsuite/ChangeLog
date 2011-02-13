@@ -1,3 +1,18 @@
+2011-02-10  Alan Modra  <amodra@gmail.com>
+
+	* ld-scripts/defined.exp: Don't run defined5 for AOUT.
+	* ld-scripts/defined5.s: Use .text for "defined" section.
+	* ld-scripts/defined5.t: Adjust.
+
+	* ld-gc/start.d: Exclude frv-*-linux*.
+	* ld-misc/defsym1.d: Likewise.
+
+2011-02-09  Alan Modra  <amodra@gmail.com>
+
+	* ld-elfvsb/elfvsb.exp: Don't run any non-PIC tests on powerpc*-linux.
+	* ld-gc/gc.exp: Ensure powerpc64 test continues to fail.
+	* ld-srec/srec.exp: Don't edit toc on powerpc64.
+
 2011-01-23  Alan Modra  <amodra@gmail.com>
 
 	* ld-scripts/sane1.d, * ld-scripts/sane1.t: New test.
