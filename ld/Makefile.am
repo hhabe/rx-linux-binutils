@@ -235,6 +235,7 @@ ALL_EMULATION_SOURCES = \
 	eelf32ppcvxworks.c \
 	eelf32ppcwindiss.c \
 	eelf32rx.c \
+	eelf32rxlinux.c \
 	eelf32vax.c \
 	eelf32xc16x.c \
 	eelf32xc16xl.c \
@@ -1072,6 +1073,9 @@ eelf32ppcwindiss.c: $(srcdir)/emulparams/elf32ppcwindiss.sh \
 eelf32rx.c: $(srcdir)/emulparams/elf32rx.sh \
   $(srcdir)/emultempl/elf32.em $(srcdir)/scripttempl/elf.sc ${GEN_DEPENDS}
 	${GENSCRIPTS} elf32rx "$(tdir_elf32rx)"
+eelf32rxlinux.c: $(srcdir)/emulparams/elf32rxlinux.sh \
+  $(srcdir)/emultempl/elf32.em $(srcdir)/scripttempl/elf.sc ${GEN_DEPENDS}
+	${GENSCRIPTS} elf32rxlinux "$(tdir_elf32rxlinux)"
 eelf32vax.c: $(srcdir)/emulparams/elf32vax.sh \
   $(ELF_DEPS) $(srcdir)/scripttempl/elf.sc ${GEN_DEPENDS}
 	${GENSCRIPTS} elf32vax "$(tdir_elf32vax)"

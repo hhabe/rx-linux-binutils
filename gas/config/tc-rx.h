@@ -32,7 +32,11 @@ extern int target_big_endian;
 /* Instruction bytes are big endian, data bytes can be either.  */
 #define TARGET_BYTES_BIG_ENDIAN 0
 
+#if defined(TE_UCLINUX)
+#define TARGET_FORMAT ("elf32-rx-linux")
+#else
 #define TARGET_FORMAT (target_big_endian ? "elf32-rx-be" : "elf32-rx-le")
+#endif
 
 /* We don't need to handle .word strangely.  */
 #define WORKING_DOT_WORD
@@ -96,10 +100,16 @@ extern void rx_handle_align (fragS *);
 #define elf_tc_final_processing	rx_elf_final_processing
 extern void rx_elf_final_processing (void);
 
+#if defined(TE_UCLINUX)
+#define TEXT_SECTION_NAME	(".text")
+#define DATA_SECTION_NAME	(".data")
+#define BSS_SECTION_NAME	(".bss" )
+#else
 extern bfd_boolean rx_use_conventional_section_names;
 #define TEXT_SECTION_NAME	(rx_use_conventional_section_names ? ".text" : "P")
 #define DATA_SECTION_NAME	(rx_use_conventional_section_names ? ".data" : "D_1")
 #define BSS_SECTION_NAME	(rx_use_conventional_section_names ? ".bss"  : "B_1")
+#endif
 
 #define md_start_line_hook rx_start_line
 extern void rx_start_line (void);

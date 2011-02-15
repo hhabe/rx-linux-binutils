@@ -69,8 +69,10 @@ const char * md_shortopts = RX_SHORTOPTS;
 /* Assembler options.  */
 struct option md_longopts[] =
 {
+#if !defined(TE_UCLINUX)
   {"mbig-endian-data", no_argument, NULL, OPTION_BIG},
   {"mlittle-endian-data", no_argument, NULL, OPTION_LITTLE},
+#endif
   /* The next two switches are here because the
      generic parts of the linker testsuite uses them.  */
   {"EB", no_argument, NULL, OPTION_BIG},
@@ -79,8 +81,10 @@ struct option md_longopts[] =
   {"m64bit-doubles", no_argument, NULL, OPTION_64BIT_DOUBLES},
   /* This option is here mainly for the binutils testsuites,
      as many of their tests assume conventional section naming.  */
+#if !defined(TE_UCLINUX)
   {"muse-conventional-section-names", no_argument, NULL, OPTION_CONVENTIONAL_SECTION_NAMES},
   {"muse-renesas-section-names", no_argument, NULL, OPTION_RENESAS_SECTION_NAMES},
+#endif
   {"msmall-data-limit", no_argument, NULL, OPTION_SMALL_DATA_LIMIT},
   {"relax", no_argument, NULL, OPTION_RELAX},
   {NULL, no_argument, NULL, 0}
@@ -108,14 +112,14 @@ md_parse_option (int c ATTRIBUTE_UNUSED, char * arg ATTRIBUTE_UNUSED)
       elf_flags |= E_FLAG_RX_64BIT_DOUBLES;
       return 1;
 
+#if !defined(TE_UCLINUX)
     case OPTION_CONVENTIONAL_SECTION_NAMES:
       rx_use_conventional_section_names = TRUE;
       return 1;
-
     case OPTION_RENESAS_SECTION_NAMES:
       rx_use_conventional_section_names = FALSE;
       return 1;
-
+#endif
     case OPTION_SMALL_DATA_LIMIT:
       rx_use_small_data_limit = TRUE;
       return 1;
@@ -124,6 +128,7 @@ md_parse_option (int c ATTRIBUTE_UNUSED, char * arg ATTRIBUTE_UNUSED)
       linkrelax = 1;
       return 1;
     }
+  
   return 0;
 }
 

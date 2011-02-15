@@ -3194,8 +3194,6 @@ rx_set_section_contents (bfd *         abfd,
   bfd_size_type scount;
 
 #ifdef DJDEBUG
-  bfd_size_type i;
-
   fprintf (stderr, "\ndj: set %ld %ld to %s  %s e%d sc%d\n",
 	   (long) offset, (long) count, section->name,
 	   bfd_big_endian (abfd) ? "be" : "le",
@@ -3380,5 +3378,22 @@ elf32_rx_modify_program_headers (bfd * abfd ATTRIBUTE_UNUSED,
 #define bfd_elf32_set_section_contents		rx_set_section_contents
 #define bfd_elf32_bfd_final_link		rx_final_link
 #define bfd_elf32_bfd_relax_section		elf32_rx_relax_section_wrapper
+
+#include "elf32-target.h"
+
+/* Linux support. */
+#undef  TARGET_BIG_SYM
+#undef  TARGET_BIG_NAME
+
+#undef  TARGET_LITTLE_SYM
+#define TARGET_LITTLE_SYM	bfd_elf32_rxlin_vec
+#undef  TARGET_LITTLE_NAME
+#define TARGET_LITTLE_NAME	"elf32-rx-linux"
+
+#undef  elf_symbol_leading_char
+#undef  elf_backend_modify_program_headers
+
+#undef  elf32_bed
+#define elf32_bed		elf32_rx_lin_bed
 
 #include "elf32-target.h"
