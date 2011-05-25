@@ -1,3 +1,118 @@
+2011-05-24  Andreas Krebbel  <Andreas.Krebbel@de.ibm.com>
+
+	* s390-opc.c: Replace S390_OPERAND_REG_EVEN with
+	S390_OPERAND_REG_PAIR.  Fix INSTR_RRF_0UFEF instruction type.
+	* s390-opc.txt: Fix cxr instruction type.
+
+2011-05-24  Andreas Krebbel  <Andreas.Krebbel@de.ibm.com>
+
+	* s390-opc.c: Add new instruction types marking register pair
+	operands.
+	* s390-opc.txt: Match instructions having register pair operands
+	to the new instruction types.
+
+2011-05-19  Nick Clifton  <nickc@redhat.com>
+
+	* v850-opc.c (cmpf.[sd]): Reverse the order of the reg1 and reg2
+	operands.
+
+2011-05-10  Quentin Neill  <quentin.neill@amd.com>
+
+	* i386-gen.c (cpu_flag_init): Add new CPU_BDVER2_FLAGS.
+	* i386-init.h: Regenerated.
+
+2011-04-27  Nick Clifton  <nickc@redhat.com>
+
+	* po/da.po: Updated Danish translation.
+
+2011-04-26  Anton Blanchard  <anton@samba.org>
+
+	* ppc-opc.c: (powerpc_opcodes): Enable icswx for POWER7.
+
+2011-04-21  DJ Delorie  <dj@redhat.com>
+
+	* rx-decode.opc (rx_decode_opcode): Set the syntax for multi-byte NOPs.
+	* rx-decode.c: Regenerate.
+
+2011-04-20  H.J. Lu  <hongjiu.lu@intel.com>
+
+	* i386-init.h: Regenerated.
+
+2011-04-19  Quentin Neill  <quentin.neill@amd.com>
+
+	* i386-gen.c (cpu_flag_init): Remove 3dnow and 3dnowa bits
+	from bdver1 flags.
+
+2011-04-13  Nick Clifton  <nickc@redhat.com>
+
+	* v850-dis.c (disassemble): Always print a closing square brace if
+	an opening square brace was printed.
+
+2011-04-12  Nick Clifton  <nickc@redhat.com>
+
+	PR binutils/12534
+	* arm-dis.c (thumb32_opcodes): Add %L suffix to LDRD and STRD insn
+	patterns.
+	(print_insn_thumb32): Handle %L.
+
+2011-04-11  Julian Brown  <julian@codesourcery.com>
+
+	* arm-dis.c (psr_name): Fix typo for BASEPRI_MAX.
+	(print_insn_thumb32): Add APSR bitmask support.
+
+2011-04-07  Paul Carroll<pcarroll@codesourcery.com>
+
+	* arm-dis.c (print_insn): init vars moved into private_data structure.
+
+2011-03-24  Mike Frysinger  <vapier@gentoo.org>
+
+	* bfin-dis.c (decode_dsp32mac_0): Move MM zeroing down to MAC0 logic.
+
+2011-03-22  Eric B. Weddington  <eric.weddington@atmel.com>
+
+	* avr-dis.c (avr_operand): Add opcode_str parameter. Check for
+	post-increment to support LPM Z+ instruction. Add support for 'E'
+	constraint for DES instruction.
+	(print_insn_avr): Adjust calls to avr_operand. Rename variable.
+
+2011-03-14  Richard Sandiford  <richard.sandiford@linaro.org>
+
+	* arm-dis.c (get_sym_code_type): Treat STT_GNU_IFUNCs as code.
+
+2011-03-14  Richard Sandiford  <richard.sandiford@linaro.org>
+
+	* arm-dis.c (get_sym_code_type): Don't check for STT_ARM_TFUNC.
+	Use branch types instead.
+	(print_insn): Likewise.
+
+2011-02-28  Maciej W. Rozycki  <macro@codesourcery.com>
+
+	* mips-opc.c (mips_builtin_opcodes): Correct register use
+	annotation of "alnv.ps".
+
+2011-02-28  Maciej W. Rozycki  <macro@codesourcery.com>
+
+	* mips-opc.c (mips_builtin_opcodes): Add "pref" macro.
+
+2011-02-22  Mike Frysinger  <vapier@gentoo.org>
+
+	* bfin-dis.c (OUTS): Remove p NULL check and txt NUL check.
+
+2011-02-22  Mike Frysinger  <vapier@gentoo.org>
+
+	* bfin-dis.c (print_insn_bfin): Change outf->fprintf_func to OUTS.
+
+2011-02-19  Mike Frysinger  <vapier@gentoo.org>
+
+	* bfin-dis.c (saved_state): Mark static.  Change a[01]x to ax[] and
+	a[01]w to aw[].  Delete ac0, ac0_copy, ac1, an, aq, av0, av0s, av1,
+	av1s, az, cc, v, v_copy, vs, rnd_mod, v_internal, pc, ticks, insts,
+	exception, end_of_registers, msize, memory, bfd_mach.
+	(CCREG, PCREG, A0XREG, A0WREG, A1XREG, A1WREG, LC0REG, LT0REG,
+	LB0REG, LC1REG, LT1REG, LB1REG): Delete
+	(AXREG, AWREG, LCREG, LTREG, LBREG): Define.
+	(get_allreg): Change to new defines.  Fallback to abort().
+
 2011-02-14  Mike Frysinger  <vapier@gentoo.org>
 
 	* bfin-dis.c: Add whitespace/parenthesis where needed.
@@ -36,9 +151,8 @@
 
 2011-02-12  Mike Frysinger  <vapier@gentoo.org>
 
-	* bfin.h (M_S2RND, M_T, M_W32, M_FU, M_TFU, M_IS, M_ISS2, M_IH,
-	M_IU): Define.
-	(is_macmod_pmove, is_macmod_hmove): New functions.
+	* bfin-dis.c (M_S2RND, M_T, M_W32, M_FU, M_TFU, M_IS, M_ISS2,
+	M_IH, M_IU): Delete.
 
 2011-02-11  Mike Frysinger  <vapier@gentoo.org>
 

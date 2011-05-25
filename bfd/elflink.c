@@ -1,6 +1,6 @@
 /* ELF linking support for BFD.
    Copyright 1995, 1996, 1997, 1998, 1999, 2000, 2001, 2002, 2003, 2004,
-   2005, 2006, 2007, 2008, 2009, 2010
+   2005, 2006, 2007, 2008, 2009, 2010, 2011
    Free Software Foundation, Inc.
 
    This file is part of BFD, the Binary File Descriptor library.
@@ -1361,8 +1361,7 @@ _bfd_elf_merge_symbol (bfd *abfd,
 	 symbols defined in dynamic objects.  */
 
       if (! ((*info->callbacks->multiple_common)
-	     (info, h->root.root.string, oldbfd, bfd_link_hash_common,
-	      h->size, abfd, bfd_link_hash_common, sym->st_size)))
+	     (info, &h->root, abfd, bfd_link_hash_common, sym->st_size)))
 	return FALSE;
 
       if (sym->st_size > h->size)
@@ -1428,7 +1427,10 @@ _bfd_elf_merge_symbol (bfd *abfd,
   /* Skip weak definitions of symbols that are already defined.  */
   if (newdef && olddef && newweak)
     {
-      *skip = TRUE;
+      /* Don't skip new non-IR weak syms.  */
+      if (!((oldbfd->flags & BFD_PLUGIN) != 0
+	    && (abfd->flags & BFD_PLUGIN) == 0))
+	*skip = TRUE;
 
       /* Merge st_other.  If the symbol already has a dynamic index,
 	 but visibility says it should not be visible, turn it into a
@@ -1513,8 +1515,7 @@ _bfd_elf_merge_symbol (bfd *abfd,
 	 common symbol, but we don't know what to use for the section
 	 or the alignment.  */
       if (! ((*info->callbacks->multiple_common)
-	     (info, h->root.root.string, oldbfd, bfd_link_hash_common,
-	      h->size, abfd, bfd_link_hash_common, sym->st_size)))
+	     (info, &h->root, abfd, bfd_link_hash_common, sym->st_size)))
 	return FALSE;
 
       /* If the presumed common symbol in the dynamic object is
@@ -3422,7 +3423,8 @@ elf_link_add_object_symbols (bfd *abfd, struct bfd_link_info *info)
      .gnu.warning.SYMBOL are treated as warning symbols for the given
      symbol.  This differs from .gnu.warning sections, which generate
      warnings when they are included in an output file.  */
-  if (info->executable)
+  /* PR 12761: Also generate this warning when building shared libraries.  */
+  if (info->executable || info->shared)
     {
       asection *s;
 
@@ -3813,7 +3815,7 @@ error_free_dyn:
       /* Make a special call to the linker "notice" function to
 	 tell it that we are about to handle an as-needed lib.  */
       if (!(*info->callbacks->notice) (info, NULL, abfd, NULL,
-				       notice_as_needed))
+				       notice_as_needed, 0, NULL))
 	goto error_free_vers;
 
       /* Clone the symbol table and sym hashes.  Remember some
@@ -3939,18 +3941,31 @@ error_free_dyn:
 	goto error_free_vers;
 
       if (isym->st_shndx == SHN_COMMON
-	  && ELF_ST_TYPE (isym->st_info) == STT_TLS
-	  && !info->relocatable)
+	  && (abfd->flags & BFD_PLUGIN) != 0)
+	{
+	  asection *xc = bfd_get_section_by_name (abfd, "COMMON");
+
+	  if (xc == NULL)
+	    {
+	      flagword sflags = (SEC_ALLOC | SEC_IS_COMMON | SEC_KEEP
+				 | SEC_EXCLUDE);
+	      xc = bfd_make_section_with_flags (abfd, "COMMON", sflags);
+	      if (xc == NULL)
+		goto error_free_vers;
+	    }
+	  sec = xc;
+	}
+      else if (isym->st_shndx == SHN_COMMON
+	       && ELF_ST_TYPE (isym->st_info) == STT_TLS
+	       && !info->relocatable)
 	{
 	  asection *tcomm = bfd_get_section_by_name (abfd, ".tcommon");
 
 	  if (tcomm == NULL)
 	    {
-	      tcomm = bfd_make_section_with_flags (abfd, ".tcommon",
-						   (SEC_ALLOC
-						    | SEC_IS_COMMON
-						    | SEC_LINKER_CREATED
-						    | SEC_THREAD_LOCAL));
+	      flagword sflags = (SEC_ALLOC | SEC_THREAD_LOCAL | SEC_IS_COMMON
+				 | SEC_LINKER_CREATED);
+	      tcomm = bfd_make_section_with_flags (abfd, ".tcommon", sflags);
 	      if (tcomm == NULL)
 		goto error_free_vers;
 	    }
@@ -4226,10 +4241,7 @@ error_free_dyn:
 		 We need to get the alignment from the section.  */
 	      align = new_sec->alignment_power;
 	    }
-	  if (align > old_alignment
-	      /* Permit an alignment power of zero if an alignment of one
-		 is specified and no other alignments have been specified.  */
-	      || (isym->st_value == 1 && old_alignment == 0))
+	  if (align > old_alignment)
 	    h->root.u.c.p->alignment_power = align;
 	  else
 	    h->root.u.c.p->alignment_power = old_alignment;
@@ -4396,6 +4408,9 @@ error_free_dyn:
 	      dynsym = FALSE;
 	    }
 
+	  if (definition)
+	    h->target_internal = isym->st_target_internal;
+
 	  /* Check to see if we need to add an indirect symbol for
 	     the default name.  */
 	  if (definition || h->root.type == bfd_link_hash_common)
@@ -4547,7 +4562,7 @@ error_free_dyn:
       /* Make a special call to the linker "notice" function to
 	 tell it that symbols added for crefs may need to be removed.  */
       if (!(*info->callbacks->notice) (info, NULL, abfd, NULL,
-				       notice_not_needed))
+				       notice_not_needed, 0, NULL))
 	goto error_free_vers;
 
       free (old_tab);
@@ -4561,7 +4576,7 @@ error_free_dyn:
   if (old_tab != NULL)
     {
       if (!(*info->callbacks->notice) (info, NULL, abfd, NULL,
-				       notice_needed))
+				       notice_needed, 0, NULL))
 	goto error_free_vers;
       free (old_tab);
       old_tab = NULL;
@@ -6526,10 +6541,13 @@ bfd_elf_size_dynsym_hash_dynstr (bfd *output_bfd, struct bfd_link_info *info)
 	    }
 	  else
 	    {
-	      unsigned long int maskwords, maskbitslog2;
+	      unsigned long int maskwords, maskbitslog2, x;
 	      BFD_ASSERT (cinfo.min_dynindx != -1);
 
-	      maskbitslog2 = bfd_log2 (cinfo.nsyms) + 1;
+	      x = cinfo.nsyms;
+	      maskbitslog2 = 1;
+	      while ((x >>= 1) != 0)
+		++maskbitslog2;
 	      if (maskbitslog2 < 3)
 		maskbitslog2 = 5;
 	      else if ((1 << (maskbitslog2 - 2)) & cinfo.nsyms)
@@ -8701,6 +8719,11 @@ elf_link_output_extsym (struct elf_link_hash_entry *h, void *data)
 	       || h->root.type == bfd_link_hash_defweak)
 	   && elf_discarded_section (h->root.u.def.section))
     strip = TRUE;
+  else if ((h->root.type == bfd_link_hash_undefined
+	    || h->root.type == bfd_link_hash_undefweak)
+	   && h->root.u.undef.abfd != NULL
+	   && (h->root.u.undef.abfd->flags & BFD_PLUGIN) != 0)
+    strip = TRUE;
   else
     strip = FALSE;
 
@@ -8729,6 +8752,7 @@ elf_link_output_extsym (struct elf_link_hash_entry *h, void *data)
     sym.st_info = ELF_ST_INFO (STB_WEAK, h->type);
   else
     sym.st_info = ELF_ST_INFO (STB_GLOBAL, h->type);
+  sym.st_target_internal = h->target_internal;
 
   switch (h->root.type)
     {
@@ -9097,6 +9121,9 @@ elf_link_input_bfd (struct elf_final_link_info *finfo, bfd *input_bfd)
   asection *o;
   const struct elf_backend_data *bed;
   struct elf_link_hash_entry **sym_hashes;
+  bfd_size_type address_size;
+  bfd_vma r_type_mask;
+  int r_sym_shift;
 
   output_bfd = finfo->output_bfd;
   bed = get_elf_backend_data (output_bfd);
@@ -9267,6 +9294,19 @@ elf_link_input_bfd (struct elf_final_link_info *finfo, bfd *input_bfd)
 	*pindex = indx;
     }
 
+  if (bed->s->arch_size == 32)
+    {
+      r_type_mask = 0xff;
+      r_sym_shift = 8;
+      address_size = 4;
+    }
+  else
+    {
+      r_type_mask = 0xffffffff;
+      r_sym_shift = 32;
+      address_size = 8;
+    }
+
   /* Relocate the contents of each section.  */
   sym_hashes = elf_sym_hashes (input_bfd);
   for (o = input_bfd->sections; o != NULL; o = o->next)
@@ -9371,8 +9411,6 @@ elf_link_input_bfd (struct elf_final_link_info *finfo, bfd *input_bfd)
 	{
 	  Elf_Internal_Rela *internal_relocs;
 	  Elf_Internal_Rela *rel, *relend;
-	  bfd_vma r_type_mask;
-	  int r_sym_shift;
 	  int action_discarded;
 	  int ret;
 
@@ -9384,15 +9422,27 @@ elf_link_input_bfd (struct elf_final_link_info *finfo, bfd *input_bfd)
 	      && o->reloc_count > 0)
 	    return FALSE;
 
-	  if (bed->s->arch_size == 32)
+	  /* We need to reverse-copy input .ctors/.dtors sections if
+	     they are placed in .init_array/.finit_array for output.  */
+	  if (o->size > address_size
+	      && ((strncmp (o->name, ".ctors", 6) == 0
+		   && strcmp (o->output_section->name,
+			      ".init_array") == 0)
+		  || (strncmp (o->name, ".dtors", 6) == 0
+		      && strcmp (o->output_section->name,
+				 ".fini_array") == 0))
+	      && (o->name[6] == 0 || o->name[6] == '.'))
 	    {
-	      r_type_mask = 0xff;
-	      r_sym_shift = 8;
-	    }
-	  else
-	    {
-	      r_type_mask = 0xffffffff;
-	      r_sym_shift = 32;
+	      if (o->size != o->reloc_count * address_size)
+		{
+		  (*_bfd_error_handler)
+		    (_("error: %B: size of section %A is not "
+		       "multiple of address size"),
+		     input_bfd, o);
+		  bfd_set_error (bfd_error_on_input);
+		  return FALSE;
+		}
+	      o->flags |= SEC_ELF_REVERSE_COPY;
 	    }
 
 	  action_discarded = -1;
@@ -9853,12 +9903,34 @@ elf_link_input_bfd (struct elf_final_link_info *finfo, bfd *input_bfd)
 	default:
 	  {
 	    /* FIXME: octets_per_byte.  */
-	    if (! (o->flags & SEC_EXCLUDE)
-		&& ! bfd_set_section_contents (output_bfd, o->output_section,
-					       contents,
-					       (file_ptr) o->output_offset,
-					       o->size))
-	      return FALSE;
+	    if (! (o->flags & SEC_EXCLUDE))
+	      {
+		file_ptr offset = (file_ptr) o->output_offset;
+		bfd_size_type todo = o->size;
+		if ((o->flags & SEC_ELF_REVERSE_COPY))
+		  {
+		    /* Reverse-copy input section to output.  */
+		    do
+		      {
+			todo -= address_size;
+			if (! bfd_set_section_contents (output_bfd,
+							o->output_section,
+							contents + todo,
+							offset,
+							address_size))
+			  return FALSE;
+			if (todo == 0)
+			  break;
+			offset += address_size;
+		      }
+		    while (1);
+		  }
+		else if (! bfd_set_section_contents (output_bfd,
+						     o->output_section,
+						     contents,
+						     offset, todo))
+		  return FALSE;
+	      }
 	  }
 	  break;
 	}
@@ -10520,6 +10592,7 @@ bfd_elf_final_link (bfd *abfd, struct bfd_link_info *info)
       elfsym.st_info = 0;
       elfsym.st_other = 0;
       elfsym.st_shndx = SHN_UNDEF;
+      elfsym.st_target_internal = 0;
       if (elf_link_output_sym (&finfo, NULL, &elfsym, bfd_und_section_ptr,
 			       NULL) != 1)
 	goto error_return;
@@ -10537,6 +10610,7 @@ bfd_elf_final_link (bfd *abfd, struct bfd_link_info *info)
       elfsym.st_info = ELF_ST_INFO (STB_LOCAL, STT_SECTION);
       elfsym.st_other = 0;
       elfsym.st_value = 0;
+      elfsym.st_target_internal = 0;
       for (i = 1; i < elf_numsections (abfd); i++)
 	{
 	  o = bfd_section_from_elf_index (abfd, i);
@@ -10787,6 +10861,7 @@ bfd_elf_final_link (bfd *abfd, struct bfd_link_info *info)
 	  sym.st_name = 0;
 	  sym.st_info = ELF_ST_INFO (STB_LOCAL, STT_SECTION);
 	  sym.st_other = 0;
+	  sym.st_target_internal = 0;
 
 	  for (s = abfd->sections; s != NULL; s = s->next)
 	    {
@@ -12597,20 +12672,6 @@ _bfd_elf_default_got_elt_size (bfd *abfd,
 
 /* Routines to support the creation of dynamic relocs.  */
 
-/* Return true if NAME is a name of a relocation
-   section associated with section S.  */
-
-static bfd_boolean
-is_reloc_section (bfd_boolean rela, const char * name, asection * s)
-{
-  if (rela)
-    return CONST_STRNEQ (name, ".rela")
-      && strcmp (bfd_get_section_name (NULL, s), name + 5) == 0;
-
-  return CONST_STRNEQ (name, ".rel")
-    && strcmp (bfd_get_section_name (NULL, s), name + 4) == 0;
-}
-
 /* Returns the name of the dynamic reloc section associated with SEC.  */
 
 static const char *
@@ -12618,26 +12679,15 @@ get_dynamic_reloc_section_name (bfd *       abfd,
 				asection *  sec,
 				bfd_boolean is_rela)
 {
-  const char * name;
-  unsigned int strndx = elf_elfheader (abfd)->e_shstrndx;
-  unsigned int shnam = _bfd_elf_single_rel_hdr (sec)->sh_name;
+  char *name;
+  const char *old_name = bfd_get_section_name (NULL, sec);
+  const char *prefix = is_rela ? ".rela" : ".rel";
 
-  name = bfd_elf_string_from_elf_section (abfd, strndx, shnam);
-  if (name == NULL)
+  if (old_name == NULL)
     return NULL;
 
-  if (! is_reloc_section (is_rela, name, sec))
-    {
-      static bfd_boolean complained = FALSE;
-
-      if (! complained)
-	{
-	  (*_bfd_error_handler)
-	    (_("%B: bad relocation section name `%s\'"),  abfd, name);
-	  complained = TRUE;
-	}
-      name = NULL;
-    }
+  name = bfd_alloc (abfd, strlen (prefix) + strlen (old_name) + 1);
+  sprintf (name, "%s%s", prefix, old_name); 
 
   return name;
 }
@@ -12730,6 +12780,7 @@ _bfd_elf_copy_link_hash_symbol_type (bfd *abfd ATTRIBUTE_UNUSED,
   struct elf_link_hash_entry *ehsrc = (struct elf_link_hash_entry *)hsrc;
 
   ehdest->type = ehsrc->type;
+  ehdest->target_internal = ehsrc->target_internal;
 }
 
 /* Append a RELA relocation REL to section S in BFD.  */

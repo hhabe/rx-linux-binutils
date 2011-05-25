@@ -369,7 +369,7 @@ fi
 AC_SUBST(RANDOM_SEED_CFLAGS)
 
 dnl On GNU/Linux ifunc is supported by the dynamic linker in glibc
-dnl 2.11 or later.
+dnl 2.11 or later, and by binutils 2.20.1 or later.
 AC_CACHE_CHECK([for glibc >= 2.11], [gold_cv_lib_glibc2_11],
 [AC_COMPILE_IFELSE([
 #include <features.h>
@@ -378,6 +378,7 @@ error
 #elif __GLIBC__ < 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ < 11)
 error
 #endif
+__asm__(".type foo, %gnu_indirect_function");
 ], [gold_cv_lib_glibc2_11=yes], [gold_cv_lib_glibc2_11=no])])
 
 AM_CONDITIONAL(IFUNC, test "$gold_cv_lib_glibc2_11" = "yes")
@@ -392,8 +393,22 @@ dnl host dependent.  If build == host, we can check getconf LFS_CFLAGS.
 LFS_CFLAGS="-D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64"
 AC_SUBST(LFS_CFLAGS)
 
-AC_CHECK_FUNCS(chsize)
-AC_REPLACE_FUNCS(pread ftruncate mremap ffsll)
+AC_CHECK_HEADERS(sys/mman.h)
+AC_CHECK_FUNCS(chsize mmap)
+AC_REPLACE_FUNCS(pread ftruncate ffsll)
+
+AC_CACHE_CHECK([mremap with MREMAP_MAYMOVE], [gold_cv_lib_mremap_maymove],
+[AC_LINK_IFELSE([
+AC_LANG_PROGRAM([[
+#include <sys/mman.h>
+void f() { mremap (0, 0, 0, MREMAP_MAYMOVE); }
+]])], [gold_cv_lib_mremap_maymove=yes], [gold_cv_lib_mremap_maymove=no])])
+if test "$gold_cv_lib_mremap_maymove" = "yes"; then
+  AC_DEFINE(HAVE_MREMAP, 1,
+    [Define to 1 if you have the mremap function with MREMAP_MAYMOVE support])
+else
+  AC_LIBOBJ(mremap)
+fi
 
 # Link in zlib if we can.  This allows us to write compressed sections.
 AC_SEARCH_LIBS(zlibVersion, z, [AC_CHECK_HEADERS(zlib.h)])

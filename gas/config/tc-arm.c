@@ -239,6 +239,15 @@ static int mfloat_abi_opt = -1;
 static arm_feature_set selected_cpu = ARM_ARCH_NONE;
 /* Must be long enough to hold any of the names in arm_cpus.  */
 static char selected_cpu_name[16];
+
+/* Return if no cpu was selected on command-line.  */
+static bfd_boolean
+no_cpu_selected (void)
+{
+  return selected_cpu.core == arm_arch_none.core
+    && selected_cpu.coproc == arm_arch_none.coproc;
+}
+
 #ifdef OBJ_ELF
 # ifdef EABI_DEFAULT
 static int meabi_flags = EABI_DEFAULT;
@@ -2403,7 +2412,7 @@ s_unreq (int a ATTRIBUTE_UNUSED)
       if (!reg)
 	as_bad (_("unknown register alias '%s'"), name);
       else if (reg->builtin)
-	as_warn (_("ignoring attempt to undefine built-in register '%s'"),
+	as_warn (_("ignoring attempt to use .unreq on fixed register name: '%s'"),
 		 name);
       else
 	{
@@ -4450,7 +4459,7 @@ parse_big_immediate (char **str, int i)
       /* If we're on a 64-bit host, then a 64-bit number can be returned using
 	 O_constant.  We have to be careful not to break compilation for
 	 32-bit X_add_number, though.  */
-      if ((exp.X_add_number & ~0xffffffffl) != 0)
+      if ((exp.X_add_number & ~(offsetT)(0xffffffffU)) != 0)
 	{
           /* X >> 32 is illegal if sizeof (exp.X_add_number) == 4.  */
 	  inst.operands[i].reg = ((exp.X_add_number >> 16) >> 16) & 0xffffffff;
@@ -5347,39 +5356,79 @@ parse_half (char **str)
 /* Parse a PSR flag operand.  The value returned is FAIL on syntax error,
    or a bitmask suitable to be or-ed into the ARM msr instruction.  */
 static int
-parse_psr (char **str)
+parse_psr (char **str, bfd_boolean lhs)
 {
   char *p;
   unsigned long psr_field;
   const struct asm_psr *psr;
   char *start;
+  bfd_boolean is_apsr = FALSE;
+  bfd_boolean m_profile = ARM_CPU_HAS_FEATURE (selected_cpu, arm_ext_m);
 
   /* CPSR's and SPSR's can now be lowercase.  This is just a convenience
      feature for ease of use and backwards compatibility.  */
   p = *str;
   if (strncasecmp (p, "SPSR", 4) == 0)
-    psr_field = SPSR_BIT;
-  else if (strncasecmp (p, "CPSR", 4) == 0 
-	   || (strncasecmp (p, "APSR", 4) == 0
-	       && !ARM_CPU_HAS_FEATURE (selected_cpu, arm_ext_m)))
-    psr_field = 0;
-  else
+    {
+      if (m_profile)
+	goto unsupported_psr;
+	
+      psr_field = SPSR_BIT;
+    }
+  else if (strncasecmp (p, "CPSR", 4) == 0)
+    {
+      if (m_profile)
+	goto unsupported_psr;
+
+      psr_field = 0;
+    }
+  else if (strncasecmp (p, "APSR", 4) == 0)
+    {
+      /* APSR[_<bits>] can be used as a synonym for CPSR[_<flags>] on ARMv7-A
+	 and ARMv7-R architecture CPUs.  */
+      is_apsr = TRUE;
+      psr_field = 0;
+    }
+  else if (m_profile)
     {
       start = p;
       do
 	p++;
       while (ISALNUM (*p) || *p == '_');
 
+      if (strncasecmp (start, "iapsr", 5) == 0
+	  || strncasecmp (start, "eapsr", 5) == 0
+	  || strncasecmp (start, "xpsr", 4) == 0
+	  || strncasecmp (start, "psr", 3) == 0)
+	p = start + strcspn (start, "rR") + 1;
+
       psr = (const struct asm_psr *) hash_find_n (arm_v7m_psr_hsh, start,
                                                   p - start);
+
       if (!psr)
 	return FAIL;
 
+      /* If APSR is being written, a bitfield may be specified.  Note that
+	 APSR itself is handled above.  */
+      if (psr->field <= 3)
+	{
+	  psr_field = psr->field;
+	  is_apsr = TRUE;
+	  goto check_suffix;
+	}
+
       *str = p;
-      return psr->field;
+      /* M-profile MSR instructions have the mask field set to "10", except
+	 *PSR variants which modify APSR, which may use a different mask (and
+	 have been handled already).  Do that by setting the PSR_f field
+	 here.  */
+      return psr->field | (lhs ? PSR_f : 0);
     }
+  else
+    goto unsupported_psr;
 
   p += 4;
+check_suffix:
   if (*p == '_')
     {
       /* A suffix follows.  */
@@ -5390,22 +5439,105 @@ parse_psr (char **str)
 	p++;
       while (ISALNUM (*p) || *p == '_');
 
-      psr = (const struct asm_psr *) hash_find_n (arm_psr_hsh, start,
-                                                  p - start);
-      if (!psr)
-	goto error;
+      if (is_apsr)
+	{
+	  /* APSR uses a notation for bits, rather than fields.  */
+	  unsigned int nzcvq_bits = 0;
+	  unsigned int g_bit = 0;
+	  char *bit;
+	  
+	  for (bit = start; bit != p; bit++)
+	    {
+	      switch (TOLOWER (*bit))
+	        {
+		case 'n':
+		  nzcvq_bits |= (nzcvq_bits & 0x01) ? 0x20 : 0x01;
+		  break;
 
-      psr_field |= psr->field;
+		case 'z':
+		  nzcvq_bits |= (nzcvq_bits & 0x02) ? 0x20 : 0x02;
+		  break;
+
+		case 'c':
+		  nzcvq_bits |= (nzcvq_bits & 0x04) ? 0x20 : 0x04;
+		  break;
+
+		case 'v':
+		  nzcvq_bits |= (nzcvq_bits & 0x08) ? 0x20 : 0x08;
+		  break;
+		
+		case 'q':
+		  nzcvq_bits |= (nzcvq_bits & 0x10) ? 0x20 : 0x10;
+		  break;
+		
+		case 'g':
+		  g_bit |= (g_bit & 0x1) ? 0x2 : 0x1;
+		  break;
+		
+		default:
+		  inst.error = _("unexpected bit specified after APSR");
+		  return FAIL;
+		}
+	    }
+	  
+	  if (nzcvq_bits == 0x1f)
+	    psr_field |= PSR_f;
+	  
+	  if (g_bit == 0x1)
+	    {
+	      if (!ARM_CPU_HAS_FEATURE (selected_cpu, arm_ext_v6_dsp))
+	        {
+		  inst.error = _("selected processor does not "
+				 "support DSP extension");
+		  return FAIL;
+		}
+
+	      psr_field |= PSR_s;
+	    }
+	  
+	  if ((nzcvq_bits & 0x20) != 0
+	      || (nzcvq_bits != 0x1f && nzcvq_bits != 0)
+	      || (g_bit & 0x2) != 0)
+	    {
+	      inst.error = _("bad bitmask specified after APSR");
+	      return FAIL;
+	    }
+	}
+      else
+        {
+	  psr = (const struct asm_psr *) hash_find_n (arm_psr_hsh, start,
+                                                      p - start);
+	  if (!psr)
+            goto error;
+
+	  psr_field |= psr->field;
+	}
     }
   else
     {
       if (ISALNUM (*p))
 	goto error;    /* Garbage after "[CS]PSR".  */
 
-      psr_field |= (PSR_c | PSR_f);
+      /* Unadorned APSR is equivalent to APSR_nzcvq/CPSR_f (for writes).  This
+         is deprecated, but allow it anyway.  */
+      if (is_apsr && lhs)
+	{
+	  psr_field |= PSR_f;
+	  as_tsktsk (_("writing to APSR without specifying a bitmask is "
+		       "deprecated"));
+	}
+      else if (!m_profile)
+	/* These bits are never right for M-profile devices: don't set them
+	   (only code paths which read/write APSR reach here).  */
+	psr_field |= (PSR_c | PSR_f);
     }
   *str = p;
   return psr_field;
+
+ unsupported_psr:
+  inst.error = _("selected processor does not support requested special "
+		 "purpose register");
+  return FAIL;
 
  error:
   inst.error = _("flag for {c}psr instruction expected");
@@ -5932,11 +6064,11 @@ enum operand_parse_code
 
   OP_CPSF,	/* CPS flags */
   OP_ENDI,	/* Endianness specifier */
-  OP_PSR,	/* CPSR/SPSR mask for msr */
+  OP_wPSR,	/* CPSR/SPSR/APSR mask for msr (writing).  */
+  OP_rPSR,	/* CPSR/SPSR/APSR mask for msr (reading).  */
   OP_COND,	/* conditional code */
   OP_TB,	/* Table branch.  */
 
-  OP_RVC_PSR,	/* CPSR/SPSR mask for msr, or VFP control register.  */
   OP_APSR_RR,   /* ARM register or "APSR_nzcv".  */
 
   OP_RRnpc_I0,	/* ARM register or literal 0 */
@@ -6402,7 +6534,6 @@ parse_operands (char *str, const unsigned int *pattern, bfd_boolean thumb)
 	case OP_CPSF:	 val = parse_cps_flags (&str);		break;
 	case OP_ENDI:	 val = parse_endian_specifier (&str);	break;
 	case OP_oROR:	 val = parse_ror (&str);		break;
-	case OP_PSR:	 val = parse_psr (&str);		break;
 	case OP_COND:	 val = parse_cond (&str);		break;
 	case OP_oBARRIER_I15:
 	  po_barrier_or_imm (str); break;
@@ -6411,11 +6542,8 @@ parse_operands (char *str, const unsigned int *pattern, bfd_boolean thumb)
             goto failure;
 	  break;
 
-        case OP_RVC_PSR:
-          po_reg_or_goto (REG_TYPE_VFC, try_banked_reg);
-          inst.operands[i].isvec = 1;  /* Mark VFP control reg as vector.  */
-          break;
-	  try_banked_reg:
+	case OP_wPSR:	 
+	case OP_rPSR:
 	  po_reg_or_goto (REG_TYPE_RNB, try_psr);
 	  if (!ARM_CPU_HAS_FEATURE (cpu_variant, arm_ext_virt))
 	    {
@@ -6424,9 +6552,9 @@ parse_operands (char *str, const unsigned int *pattern, bfd_boolean thumb)
 	      goto failure;
 	    }
 	  break;
-          try_psr:
-          val = parse_psr (&str);
-          break;
+	  try_psr:
+	  val = parse_psr (&str, op_parse_code == OP_wPSR);
+	  break;
 
         case OP_APSR_RR:
           po_reg_or_goto (REG_TYPE_RN, try_apsr);
@@ -6583,8 +6711,8 @@ parse_operands (char *str, const unsigned int *pattern, bfd_boolean thumb)
 	case OP_CPSF:
 	case OP_ENDI:
 	case OP_oROR:
-	case OP_PSR:
-        case OP_RVC_PSR:
+	case OP_wPSR:
+	case OP_rPSR:
 	case OP_COND:
 	case OP_oBARRIER_I15:
 	case OP_REGLST:
@@ -7912,7 +8040,7 @@ do_mrs (void)
       /* mrs only accepts CPSR/SPSR/CPSR_all/SPSR_all.  */
       constraint ((inst.operands[1].imm & (PSR_c|PSR_x|PSR_s|PSR_f))
 		  != (PSR_c|PSR_f),
-		  _("'CPSR' or 'SPSR' expected"));
+		  _("'APSR', 'CPSR' or 'SPSR' expected"));
       br = (15<<16) | (inst.operands[1].imm & SPSR_BIT);
     }
 
@@ -10259,6 +10387,21 @@ do_t_ldst (void)
 	}
       /* Definitely a 32-bit variant.  */
 
+      /* Warning for Erratum 752419.  */
+      if (opcode == T_MNEM_ldr
+	  && inst.operands[0].reg == REG_SP
+	  && inst.operands[1].writeback == 1
+	  && !inst.operands[1].immisreg)
+	{
+	  if (no_cpu_selected ()
+	      || (ARM_CPU_HAS_FEATURE (cpu_variant, arm_ext_v7)
+	          && !ARM_CPU_HAS_FEATURE (cpu_variant, arm_ext_v7a)
+	          && !ARM_CPU_HAS_FEATURE (cpu_variant, arm_ext_v7r)))
+	    as_warn (_("This instruction may be unpredictable "
+		       "if executed on M-profile cores "
+		       "with interrupts enabled."));
+	}
+
       /* Do some validations regarding addressing modes.  */
       if (inst.operands[1].immisreg && opcode != T_MNEM_ldr
 	  && opcode != T_MNEM_str)
@@ -10828,21 +10971,14 @@ do_t_mrs (void)
     {
       int flags = inst.operands[1].imm & (PSR_c|PSR_x|PSR_s|PSR_f|SPSR_BIT);
 
-      if (flags == 0)
-	{
-	  constraint (!ARM_CPU_HAS_FEATURE (cpu_variant, arm_ext_m),
-		      _("selected processor does not support "
-			"requested special purpose register"));
-	}
+      if (ARM_CPU_HAS_FEATURE (selected_cpu, arm_ext_m))
+	constraint (flags != 0, _("selected processor does not support "
+        	    "requested special purpose register"));
       else
-	{
-	  constraint (!ARM_CPU_HAS_FEATURE (cpu_variant, arm_ext_v1),
-		      _("selected processor does not support "
-			"requested special purpose register"));
-	  /* mrs only accepts CPSR/SPSR/CPSR_all/SPSR_all.  */
-	  constraint ((flags & ~SPSR_BIT) != (PSR_c|PSR_f),
-		      _("'CPSR' or 'SPSR' expected"));
-	}
+	/* mrs only accepts APSR/CPSR/SPSR/CPSR_all/SPSR_all (for non-M profile
+	   devices).  */
+	constraint ((flags & ~SPSR_BIT) != (PSR_c|PSR_f),
+		    _("'APSR', 'CPSR' or 'SPSR' expected"));
 
       inst.instruction |= (flags & SPSR_BIT) >> 2;
       inst.instruction |= inst.operands[1].imm & 0xff;
@@ -10867,19 +11003,20 @@ do_t_msr (void)
   else
     flags = inst.operands[0].imm;
 
-  if (flags & ~0xff)
+  if (ARM_CPU_HAS_FEATURE (selected_cpu, arm_ext_m))
     {
-      constraint (!ARM_CPU_HAS_FEATURE (cpu_variant, arm_ext_v1),
-		  _("selected processor does not support "
-		    "requested special purpose register"));
+      int bits = inst.operands[0].imm & (PSR_c|PSR_x|PSR_s|PSR_f|SPSR_BIT);
+
+      constraint ((ARM_CPU_HAS_FEATURE (selected_cpu, arm_ext_v6_dsp)
+		   && (bits & ~(PSR_s | PSR_f)) != 0)
+		  || (!ARM_CPU_HAS_FEATURE (selected_cpu, arm_ext_v6_dsp)
+		      && bits != PSR_f),
+		  _("selected processor does not support requested special "
+		    "purpose register"));
     }
   else
-    {
-      constraint (!ARM_CPU_HAS_FEATURE (cpu_variant, arm_ext_m),
-		  _("selected processor does not support "
-		    "requested special purpose register"));
-      flags |= PSR_f;
-    }
+     constraint ((flags & 0xff) != 0, _("selected processor does not support "
+		 "requested special purpose register"));
 
   Rn = inst.operands[1].reg;
   reject_bad_reg (Rn);
@@ -11647,7 +11784,9 @@ do_t_swi (void)
      to ARM_EXT_V6M.  */
   if (ARM_CPU_HAS_FEATURE (cpu_variant, arm_ext_v6m))
     {
-      if (!ARM_CPU_HAS_FEATURE (cpu_variant, arm_ext_os))
+      if (!ARM_CPU_HAS_FEATURE (cpu_variant, arm_ext_os)
+	  /* This only applies to the v6m howver, not later architectures.  */
+	  && ! ARM_CPU_HAS_FEATURE (cpu_variant, arm_ext_v7))
 	as_bad (_("SVC is not permitted on this architecture"));
       ARM_MERGE_FEATURE_SETS (thumb_arch_used, thumb_arch_used, arm_ext_os);
     }
@@ -16440,7 +16579,6 @@ static const struct asm_psr psrs[] =
   {"c",	   PSR_c},
   {"x",	   PSR_x},
   {"s",	   PSR_s},
-  {"g",	   PSR_s},
 
   /* Combinations of flags.  */
   {"fs",   PSR_f | PSR_s},
@@ -16503,10 +16641,6 @@ static const struct asm_psr psrs[] =
   {"csxf", PSR_c | PSR_s | PSR_x | PSR_f},
   {"cxfs", PSR_c | PSR_x | PSR_f | PSR_s},
   {"cxsf", PSR_c | PSR_x | PSR_s | PSR_f},
-
-  /* APSR flags */
-  {"nzcvq", PSR_f},
-  {"nzcvqg", PSR_s | PSR_f}
 };
 
 /* Table of V7M psr names.  */
@@ -16525,6 +16659,7 @@ static const struct asm_psr v7m_psrs[] =
   {"primask",	  16}, {"PRIMASK",	16},
   {"basepri",	  17}, {"BASEPRI",	17},
   {"basepri_max", 18}, {"BASEPRI_MAX",	18},
+  {"basepri_max", 18}, {"BASEPRI_MASK",	18}, /* Typo, preserved for backwards compatibility.  */
   {"faultmask",	  19}, {"FAULTMASK",	19},
   {"control",	  20}, {"CONTROL",	20}
 };
@@ -16955,8 +17090,8 @@ static const struct asm_opcode insns[] =
 #undef  THUMB_VARIANT
 #define THUMB_VARIANT  & arm_ext_msr
 
- TCE("mrs",	1000000, f3e08000, 2, (APSR_RR, RVC_PSR), mrs, t_mrs),
- TCE("msr",	120f000, f3808000, 2, (RVC_PSR, RR_EXi), msr, t_msr),
+ TCE("mrs",	1000000, f3e08000, 2, (RRnpc, rPSR), mrs, t_mrs),
+ TCE("msr",	120f000, f3808000, 2, (wPSR, RR_EXi), msr, t_msr),
 
 #undef  ARM_VARIANT
 #define ARM_VARIANT    & arm_ext_v3m	 /* ARM 7M long multiplies.  */
@@ -18967,6 +19102,12 @@ relax_branch (fragS *fragp, asection *sec, int bits, long stretch)
   if (S_IS_DEFINED (fragp->fr_symbol)
       && ARM_IS_FUNC (fragp->fr_symbol))
       return 4;
+
+  /* PR 12532.  Global symbols with default visibility might
+     be preempted, so do not relax relocations to them.  */
+  if ((ELF_ST_VISIBILITY (S_GET_OTHER (fragp->fr_symbol)) == STV_DEFAULT)
+      && (! S_IS_LOCAL (fragp->fr_symbol)))
+    return 4;
 #endif
 
   val = relaxed_symbol_addr (fragp, stretch);
@@ -19750,7 +19891,7 @@ md_pcrel_from_section (fixS * fixP, segT seg)
     case BFD_RELOC_THUMB_PCREL_BRANCH23:
       if (fixP->fx_addsy
 	  && (S_GET_SEGMENT (fixP->fx_addsy) == seg)
-	  && (!S_IS_EXTERNAL (fixP->fx_addsy))
+	  && !S_FORCE_RELOC (fixP->fx_addsy, TRUE)
 	  && ARM_IS_FUNC (fixP->fx_addsy)
  	  && ARM_CPU_HAS_FEATURE (selected_cpu, arm_ext_v5t))
  	base = fixP->fx_where + fixP->fx_frag->fr_address;
@@ -19761,7 +19902,7 @@ md_pcrel_from_section (fixS * fixP, segT seg)
     case BFD_RELOC_THUMB_PCREL_BLX:
       if (fixP->fx_addsy
 	  && (S_GET_SEGMENT (fixP->fx_addsy) == seg)
-	  && (!S_IS_EXTERNAL (fixP->fx_addsy))
+	  && !S_FORCE_RELOC (fixP->fx_addsy, TRUE)
  	  && THUMB_IS_FUNC (fixP->fx_addsy)
  	  && ARM_CPU_HAS_FEATURE (selected_cpu, arm_ext_v5t))
  	base = fixP->fx_where + fixP->fx_frag->fr_address;
@@ -19772,7 +19913,7 @@ md_pcrel_from_section (fixS * fixP, segT seg)
     case BFD_RELOC_ARM_PCREL_BLX:
       if (fixP->fx_addsy
 	  && (S_GET_SEGMENT (fixP->fx_addsy) == seg)
-	  && (!S_IS_EXTERNAL (fixP->fx_addsy))
+	  && !S_FORCE_RELOC (fixP->fx_addsy, TRUE)
  	  && ARM_IS_FUNC (fixP->fx_addsy)
  	  && ARM_CPU_HAS_FEATURE (selected_cpu, arm_ext_v5t))
  	base = fixP->fx_where + fixP->fx_frag->fr_address;
@@ -19781,7 +19922,7 @@ md_pcrel_from_section (fixS * fixP, segT seg)
     case BFD_RELOC_ARM_PCREL_CALL:
       if (fixP->fx_addsy
 	  && (S_GET_SEGMENT (fixP->fx_addsy) == seg)
-	  && (!S_IS_EXTERNAL (fixP->fx_addsy))
+	  && !S_FORCE_RELOC (fixP->fx_addsy, TRUE)
  	  && THUMB_IS_FUNC (fixP->fx_addsy)
  	  && ARM_CPU_HAS_FEATURE (selected_cpu, arm_ext_v5t))
  	base = fixP->fx_where + fixP->fx_frag->fr_address;
@@ -20595,7 +20736,7 @@ md_apply_fix (fixS *	fixP,
 
       if (ARM_CPU_HAS_FEATURE (selected_cpu, arm_ext_v5t)
 	  && fixP->fx_addsy
-	  && !S_IS_EXTERNAL (fixP->fx_addsy)
+	  && !S_FORCE_RELOC (fixP->fx_addsy, TRUE)
 	  && (S_GET_SEGMENT (fixP->fx_addsy) == seg)
 	  && THUMB_IS_FUNC (fixP->fx_addsy))
 	/* Flip the bl to blx. This is a simple flip
@@ -20615,7 +20756,7 @@ md_apply_fix (fixS *	fixP,
     case BFD_RELOC_ARM_PCREL_JUMP:
       if (ARM_CPU_HAS_FEATURE (selected_cpu, arm_ext_v5t)
 	  && fixP->fx_addsy
-	  && !S_IS_EXTERNAL (fixP->fx_addsy)
+	  && !S_FORCE_RELOC (fixP->fx_addsy, TRUE)
 	  && (S_GET_SEGMENT (fixP->fx_addsy) == seg)
 	  && THUMB_IS_FUNC (fixP->fx_addsy))
 	{
@@ -20638,7 +20779,7 @@ md_apply_fix (fixS *	fixP,
       temp = 1;
       if (ARM_CPU_HAS_FEATURE (selected_cpu, arm_ext_v5t)
 	  && fixP->fx_addsy
-	  && !S_IS_EXTERNAL (fixP->fx_addsy)
+	  && !S_FORCE_RELOC (fixP->fx_addsy, TRUE)
 	  && (S_GET_SEGMENT (fixP->fx_addsy) == seg)
 	  && ARM_IS_FUNC (fixP->fx_addsy))
 	{
@@ -20746,8 +20887,7 @@ md_apply_fix (fixS *	fixP,
     case BFD_RELOC_THUMB_PCREL_BRANCH20:
       if (fixP->fx_addsy
 	  && (S_GET_SEGMENT (fixP->fx_addsy) == seg)
-	  && !S_IS_EXTERNAL (fixP->fx_addsy)
-	  && S_IS_DEFINED (fixP->fx_addsy)
+	  && !S_FORCE_RELOC (fixP->fx_addsy, TRUE)
 	  && ARM_IS_FUNC (fixP->fx_addsy)
 	  && ARM_CPU_HAS_FEATURE (selected_cpu, arm_ext_v5t))
 	{
@@ -20785,8 +20925,7 @@ md_apply_fix (fixS *	fixP,
 	 about it.  */
 
       if (fixP->fx_addsy
-	  && S_IS_DEFINED (fixP->fx_addsy)
-	  && !S_IS_EXTERNAL (fixP->fx_addsy)
+	  && !S_FORCE_RELOC (fixP->fx_addsy, TRUE)
 	  && (S_GET_SEGMENT (fixP->fx_addsy) == seg)
 	  && THUMB_IS_FUNC (fixP->fx_addsy))
 	{
@@ -20810,8 +20949,7 @@ md_apply_fix (fixS *	fixP,
 	 is converted to a blx.  */
       if (fixP->fx_addsy
 	  && (S_GET_SEGMENT (fixP->fx_addsy) == seg)
-	  && !S_IS_EXTERNAL (fixP->fx_addsy)
-	  && S_IS_DEFINED (fixP->fx_addsy)
+	  && !S_FORCE_RELOC (fixP->fx_addsy, TRUE)
 	  && ARM_IS_FUNC (fixP->fx_addsy)
 	  && ARM_CPU_HAS_FEATURE (selected_cpu, arm_ext_v5t))
 	{
@@ -22011,8 +22149,8 @@ arm_adjust_symtab (void)
 	      /* If it's a .thumb_func, declare it as so,
 		 otherwise tag label as .code 16.  */
 	      if (THUMB_IS_FUNC (sym))
-		elf_sym->internal_elf_sym.st_info =
-		  ELF_ST_INFO (bind, STT_ARM_TFUNC);
+		elf_sym->internal_elf_sym.st_target_internal
+		  = ST_BRANCH_TO_THUMB;
 	      else if (EF_ARM_EABI_VERSION (meabi_flags) < EF_ARM_EABI_VER4)
 		elf_sym->internal_elf_sym.st_info =
 		  ELF_ST_INFO (bind, STT_ARM_16BIT);
@@ -23716,7 +23854,7 @@ arm_apply_sym_value (struct fix * fixP)
 {
   if (fixP->fx_addsy
       && ARM_CPU_HAS_FEATURE (selected_cpu, arm_ext_v5t)
-      && !S_IS_EXTERNAL (fixP->fx_addsy))
+      && !S_FORCE_RELOC (fixP->fx_addsy, TRUE))
     {
       switch (fixP->fx_r_type)
 	{

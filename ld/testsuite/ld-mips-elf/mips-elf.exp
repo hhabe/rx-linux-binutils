@@ -160,8 +160,10 @@ if $has_newabi {
 
 if { $linux_gnu } {
     run_dump_test "rel32-o32"
-    run_dump_test "rel32-n32"
-    run_dump_test "rel64"
+    if { $has_newabi } {
+	run_dump_test "rel32-n32"
+	run_dump_test "rel64"
+    }
     # The first test checks that a mixed PIC/non-PIC relocatable link
     # will not introduce any stubs itself, but will flag PIC functions
     # for the final link.
@@ -296,6 +298,18 @@ if {$has_newabi} {
 }
 run_dump_test "reloc-4"
 run_dump_test "reloc-5"
+if { $has_newabi } {
+    run_ld_link_tests {
+	{"reloc test 6a" "-shared"
+	 "-n32" "reloc-6a.s"
+	 {}
+	 "reloc-6a.so"}
+	{"reloc test 6b" "tmpdir/reloc-6a.so"
+	 "-n32" "reloc-6b.s"
+	 {}
+	 "reloc-6b"}
+    }
+}
 
 if {$has_newabi && $linux_gnu} {
     run_dump_test "eh-frame1-n32"
@@ -333,7 +347,9 @@ if {$has_newabi} {
 }
 
 if { $linux_gnu } {
-    run_dump_test "textrel-1"
+    if { $has_newabi } {
+	run_dump_test "textrel-1"
+    }
     run_dump_test "got-page-1"
     if $has_newabi {
 	run_dump_test "got-page-2"

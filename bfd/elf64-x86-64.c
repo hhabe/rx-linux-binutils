@@ -1,6 +1,7 @@
 /* X86-64 specific support for ELF
    Copyright 2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009,
-   2010  Free Software Foundation, Inc.
+   2010, 2011
+   Free Software Foundation, Inc.
    Contributed by Jan Hubicka <jh@suse.cz>.
 
    This file is part of BFD, the Binary File Descriptor library.
@@ -865,18 +866,34 @@ elf_x86_64_check_tls_transition (bfd *abfd,
 
       if (r_type == R_X86_64_TLSGD)
 	{
-	  /* Check transition from GD access model.  Only
+	  /* Check transition from GD access model.  For 64bit, only
 		.byte 0x66; leaq foo@tlsgd(%rip), %rdi
+		.word 0x6666; rex64; call __tls_get_addr
+	     can transit to different access model.  For 32bit, only
+		leaq foo@tlsgd(%rip), %rdi
 		.word 0x6666; rex64; call __tls_get_addr
 	     can transit to different access model.  */
 
-	  static x86_64_opcode32 leaq = { { 0x66, 0x48, 0x8d, 0x3d } },
-				 call = { { 0x66, 0x66, 0x48, 0xe8 } };
-	  if (offset < 4
-	      || (offset + 12) > sec->size
-	      || bfd_get_32 (abfd, contents + offset - 4) != leaq.i
+	  static x86_64_opcode32 call = { { 0x66, 0x66, 0x48, 0xe8 } };
+	  if ((offset + 12) > sec->size
 	      || bfd_get_32 (abfd, contents + offset + 4) != call.i)
 	    return FALSE;
+
+	  if (ABI_64_P (abfd))
+	    {
+	      static x86_64_opcode32 leaq = { { 0x66, 0x48, 0x8d, 0x3d } };
+	      if (offset < 4
+		  || bfd_get_32 (abfd, contents + offset - 4) != leaq.i)
+		return FALSE;
+	    }
+	  else
+	    {
+	      static x86_64_opcode16 lea = { { 0x8d, 0x3d } };
+	      if (offset < 3
+		  || bfd_get_8 (abfd, contents + offset - 3) != 0x48
+		  || bfd_get_16 (abfd, contents + offset - 2) != lea.i)
+		return FALSE;
+	    }
 	}
       else
 	{
@@ -913,16 +930,29 @@ elf_x86_64_check_tls_transition (bfd *abfd,
 
     case R_X86_64_GOTTPOFF:
       /* Check transition from IE access model:
-		movq foo@gottpoff(%rip), %reg
-		addq foo@gottpoff(%rip), %reg
+		mov foo@gottpoff(%rip), %reg
+		add foo@gottpoff(%rip), %reg
        */
 
-      if (offset < 3 || (offset + 4) > sec->size)
-	return FALSE;
-
-      val = bfd_get_8 (abfd, contents + offset - 3);
-      if (val != 0x48 && val != 0x4c)
-	return FALSE;
+      /* Check REX prefix first.  */
+      if (offset >= 3 && (offset + 4) <= sec->size)
+	{
+	  val = bfd_get_8 (abfd, contents + offset - 3);
+	  if (val != 0x48 && val != 0x4c)
+	    {
+	      /* X32 may have 0x44 REX prefix or no REX prefix.  */
+	      if (ABI_64_P (abfd))
+		return FALSE;
+	    }
+	}
+      else
+	{
+	  /* X32 may not have any REX prefix.  */
+	  if (ABI_64_P (abfd))
+	    return FALSE;
+	  if (offset < 2 || (offset + 3) > sec->size)
+	    return FALSE;
+	}
 
       val = bfd_get_8 (abfd, contents + offset - 2);
       if (val != 0x8b && val != 0x03)
@@ -1231,7 +1261,9 @@ elf_x86_64_check_relocs (bfd *abfd, struct bfd_link_info *info,
 	    case R_X86_64_PLT32:
 	    case R_X86_64_GOTPCREL:
 	    case R_X86_64_GOTPCREL64:
-	      if (!_bfd_elf_create_ifunc_sections (abfd, info))
+	      if (htab->elf.dynobj == NULL)
+		htab->elf.dynobj = abfd;
+	      if (!_bfd_elf_create_ifunc_sections (htab->elf.dynobj, info))
 		return FALSE;
 	      break;
 	    }
@@ -2269,6 +2301,10 @@ elf_x86_64_readonly_dynrelocs (struct elf_link_hash_entry *h,
   if (h->root.type == bfd_link_hash_warning)
     h = (struct elf_link_hash_entry *) h->root.u.i.link;
 
+  /* Skip local IFUNC symbols. */
+  if (h->forced_local && h->type == STT_GNU_IFUNC)
+    return TRUE;
+
   eh = (struct elf_x86_64_link_hash_entry *) h;
   for (p = eh->dyn_relocs; p != NULL; p = p->next)
     {
@@ -2279,6 +2315,11 @@ elf_x86_64_readonly_dynrelocs (struct elf_link_hash_entry *h,
 	  struct bfd_link_info *info = (struct bfd_link_info *) inf;
 
 	  info->flags |= DF_TEXTREL;
+
+	  if (info->warn_shared_textrel && info->shared)
+	    info->callbacks->einfo (_("%P: %B: warning: relocation against `%s' in readonly section `%A'.\n"),
+				    p->sec->owner, h->root.root.string,
+				    p->sec);
 
 	  /* Not an error, just cut short the traversal.  */
 	  return FALSE;
@@ -2359,7 +2400,13 @@ elf_x86_64_size_dynamic_sections (bfd *output_bfd,
 		  srel = elf_section_data (p->sec)->sreloc;
 		  srel->size += p->count * bed->s->sizeof_rela;
 		  if ((p->sec->output_section->flags & SEC_READONLY) != 0)
-		    info->flags |= DF_TEXTREL;
+		    {
+		      info->flags |= DF_TEXTREL;
+		      if (info->warn_shared_textrel && info->shared)
+			info->callbacks->einfo (_("%P: %B: warning: relocation in readonly section `%A'.\n"),
+						p->sec->owner, p->sec);
+		      break;
+		    }
 		}
 	    }
 	}
@@ -2874,6 +2921,7 @@ elf_x86_64_relocate_section (bfd *output_bfd,
 	    case R_X86_64_32:
 	      if (ABI_64_P (output_bfd))
 		goto do_relocation;
+	      /* FALLTHROUGH */
 	    case R_X86_64_64: 
 	      if (rel->r_addend != 0)
 		{
@@ -2937,7 +2985,7 @@ elf_x86_64_relocate_section (bfd *output_bfd,
 		     internal symbol, we have updated addend.  */
 		  continue;
 		}
-
+	      /* FALLTHROUGH */
 	    case R_X86_64_PC32:
 	    case R_X86_64_PC64:
 	    case R_X86_64_PLT32:
@@ -2998,18 +3046,6 @@ elf_x86_64_relocate_section (bfd *output_bfd,
 
 	      relocation = (base_got->output_section->vma
 			    + base_got->output_offset + off);
-
-	      if (r_type != R_X86_64_GOTPCREL
-		  && r_type != R_X86_64_GOTPCREL64)
-		{
-		  asection *gotplt;
-		  if (htab->elf.splt != NULL)
-		    gotplt = htab->elf.sgotplt;
-		  else
-		    gotplt = htab->elf.igotplt;
-		  relocation -= (gotplt->output_section->vma
-				 - gotplt->output_offset);
-		}
 
 	      goto do_relocation;
 	    }
@@ -3393,7 +3429,11 @@ elf_x86_64_relocate_section (bfd *output_bfd,
 
 	      sreloc = elf_section_data (input_section)->sreloc;
 
-	      BFD_ASSERT (sreloc != NULL && sreloc->contents != NULL);
+	      if (sreloc == NULL || sreloc->contents == NULL)
+		{
+		  r = bfd_reloc_notsupported;
+		  goto check_relocation_error;
+		}
 
 	      elf_append_rela (output_bfd, sreloc, &outrel);
 
@@ -3432,15 +3472,26 @@ elf_x86_64_relocate_section (bfd *output_bfd,
 
 	      if (ELF32_R_TYPE (rel->r_info) == R_X86_64_TLSGD)
 		{
-		  /* GD->LE transition.
+		  /* GD->LE transition.  For 64bit, change
 		     .byte 0x66; leaq foo@tlsgd(%rip), %rdi
 		     .word 0x6666; rex64; call __tls_get_addr
-		     Change it into:
+		     into:
 		     movq %fs:0, %rax
+		     leaq foo@tpoff(%rax), %rax
+		     For 32bit, change
+		     leaq foo@tlsgd(%rip), %rdi
+		     .word 0x6666; rex64; call __tls_get_addr
+		     into:
+		     movl %fs:0, %eax
 		     leaq foo@tpoff(%rax), %rax */
-		  memcpy (contents + roff - 4,
-			  "\x64\x48\x8b\x04\x25\0\0\0\0\x48\x8d\x80\0\0\0",
-			  16);
+		  if (ABI_64_P (output_bfd))
+		    memcpy (contents + roff - 4,
+			    "\x64\x48\x8b\x04\x25\0\0\0\0\x48\x8d\x80\0\0\0",
+			    16);
+		  else
+		    memcpy (contents + roff - 3,
+			    "\x64\x8b\x04\x25\0\0\0\0\x48\x8d\x80\0\0\0",
+			    15);
 		  bfd_put_32 (output_bfd,
 			      elf_x86_64_tpoff (info, relocation),
 			      contents + roff + 8);
@@ -3505,6 +3556,9 @@ elf_x86_64_relocate_section (bfd *output_bfd,
 		      if (val == 0x4c)
 			bfd_put_8 (output_bfd, 0x49,
 				   contents + roff - 3);
+		      else if (!ABI_64_P (output_bfd) && val == 0x44)
+			bfd_put_8 (output_bfd, 0x41,
+				   contents + roff - 3);
 		      bfd_put_8 (output_bfd, 0xc7,
 				 contents + roff - 2);
 		      bfd_put_8 (output_bfd, 0xc0 | reg,
@@ -3517,6 +3571,9 @@ elf_x86_64_relocate_section (bfd *output_bfd,
 		      if (val == 0x4c)
 			bfd_put_8 (output_bfd, 0x49,
 				   contents + roff - 3);
+		      else if (!ABI_64_P (output_bfd) && val == 0x44)
+			bfd_put_8 (output_bfd, 0x41,
+				   contents + roff - 3);
 		      bfd_put_8 (output_bfd, 0x81,
 				 contents + roff - 2);
 		      bfd_put_8 (output_bfd, 0xc0 | reg,
@@ -3527,6 +3584,9 @@ elf_x86_64_relocate_section (bfd *output_bfd,
 		      /* addq -> leaq */
 		      if (val == 0x4c)
 			bfd_put_8 (output_bfd, 0x4d,
+				   contents + roff - 3);
+		      else if (!ABI_64_P (output_bfd) && val == 0x44)
+			bfd_put_8 (output_bfd, 0x45,
 				   contents + roff - 3);
 		      bfd_put_8 (output_bfd, 0x8d,
 				 contents + roff - 2);
@@ -3659,15 +3719,26 @@ elf_x86_64_relocate_section (bfd *output_bfd,
 
 	      if (ELF32_R_TYPE (rel->r_info) == R_X86_64_TLSGD)
 		{
-		  /* GD->IE transition.
+		  /* GD->IE transition.  For 64bit, change
 		     .byte 0x66; leaq foo@tlsgd(%rip), %rdi
 		     .word 0x6666; rex64; call __tls_get_addr@plt
-		     Change it into:
+		     into:
 		     movq %fs:0, %rax
+		     addq foo@gottpoff(%rip), %rax
+		     For 32bit, change
+		     leaq foo@tlsgd(%rip), %rdi
+		     .word 0x6666; rex64; call __tls_get_addr@plt
+		     into:
+		     movl %fs:0, %eax
 		     addq foo@gottpoff(%rip), %rax */
-		  memcpy (contents + roff - 4,
-			  "\x64\x48\x8b\x04\x25\0\0\0\0\x48\x03\x05\0\0\0",
-			  16);
+		  if (ABI_64_P (output_bfd))
+		    memcpy (contents + roff - 4,
+			    "\x64\x48\x8b\x04\x25\0\0\0\0\x48\x03\x05\0\0\0",
+			    16);
+		  else
+		    memcpy (contents + roff - 3,
+			    "\x64\x8b\x04\x25\0\0\0\0\x48\x03\x05\0\0\0",
+			    15);
 
 		  relocation = (htab->elf.sgot->output_section->vma
 				+ htab->elf.sgot->output_offset + off
@@ -3736,12 +3807,18 @@ elf_x86_64_relocate_section (bfd *output_bfd,
 	    {
 	      /* LD->LE transition:
 		 leaq foo@tlsld(%rip), %rdi; call __tls_get_addr.
-		 We change it into:
-		 .word 0x6666; .byte 0x66; movl %fs:0, %rax.  */
+		 For 64bit, we change it into:
+		 .word 0x6666; .byte 0x66; movq %fs:0, %rax.
+		 For 32bit, we change it into:
+		 nopl 0x0(%rax); movl %fs:0, %eax.  */
 
 	      BFD_ASSERT (r_type == R_X86_64_TPOFF32);
-	      memcpy (contents + rel->r_offset - 3,
-		      "\x66\x66\x66\x64\x48\x8b\x04\x25\0\0\0", 12);
+	      if (ABI_64_P (output_bfd))
+		memcpy (contents + rel->r_offset - 3,
+			"\x66\x66\x66\x64\x48\x8b\x04\x25\0\0\0", 12);
+	      else
+		memcpy (contents + rel->r_offset - 3,
+			"\x0f\x1f\x40\x00\x64\x8b\x04\x25\0\0\0", 12);
 	      /* Skip R_X86_64_PC32/R_X86_64_PLT32.  */
 	      rel++;
 	      continue;
@@ -3813,6 +3890,7 @@ do_relocation:
 				    contents, rel->r_offset,
 				    relocation, rel->r_addend);
 
+check_relocation_error:
       if (r != bfd_reloc_ok)
 	{
 	  const char *name;
@@ -3900,7 +3978,7 @@ elf_x86_64_finish_dynamic_symbol (bfd *output_bfd,
 	  || plt == NULL
 	  || gotplt == NULL
 	  || relplt == NULL)
-	abort ();
+	return FALSE;
 
       /* Get the index in the procedure linkage table which
 	 corresponds to this symbol.  This is the index of this symbol
@@ -4396,8 +4474,9 @@ elf_x86_64_add_symbol_hook (bfd *abfd,
     }
 
   if ((abfd->flags & DYNAMIC) == 0
-      && ELF_ST_TYPE (sym->st_info) == STT_GNU_IFUNC)
-    elf_tdata (info->output_bfd)->has_ifunc_symbols = TRUE;
+      && (ELF_ST_TYPE (sym->st_info) == STT_GNU_IFUNC
+	  || ELF_ST_BIND (sym->st_info) == STB_GNU_UNIQUE))
+    elf_tdata (info->output_bfd)->has_gnu_symbols = TRUE;
 
   return TRUE;
 }
@@ -4474,14 +4553,14 @@ elf_x86_64_merge_symbol (struct bfd_link_info *info ATTRIBUTE_UNUSED,
 			 bfd_boolean *override ATTRIBUTE_UNUSED,
 			 bfd_boolean *type_change_ok ATTRIBUTE_UNUSED,
 			 bfd_boolean *size_change_ok ATTRIBUTE_UNUSED,
-			 bfd_boolean *newdef ATTRIBUTE_UNUSED,
-			 bfd_boolean *newdyn,
+			 bfd_boolean *newdyn ATTRIBUTE_UNUSED,
+			 bfd_boolean *newdef,
 			 bfd_boolean *newdyncommon ATTRIBUTE_UNUSED,
 			 bfd_boolean *newweak ATTRIBUTE_UNUSED,
 			 bfd *abfd ATTRIBUTE_UNUSED,
 			 asection **sec,
-			 bfd_boolean *olddef ATTRIBUTE_UNUSED,
-			 bfd_boolean *olddyn,
+			 bfd_boolean *olddyn ATTRIBUTE_UNUSED,
+			 bfd_boolean *olddef,
 			 bfd_boolean *olddyncommon ATTRIBUTE_UNUSED,
 			 bfd_boolean *oldweak ATTRIBUTE_UNUSED,
 			 bfd *oldbfd,
@@ -4490,9 +4569,9 @@ elf_x86_64_merge_symbol (struct bfd_link_info *info ATTRIBUTE_UNUSED,
   /* A normal common symbol and a large common symbol result in a
      normal common symbol.  We turn the large common symbol into a
      normal one.  */
-  if (!*olddyn
+  if (!*olddef
       && h->root.type == bfd_link_hash_common
-      && !*newdyn
+      && !*newdef
       && bfd_is_com_section (*sec)
       && *oldsec != *sec)
     {

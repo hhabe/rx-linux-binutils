@@ -209,7 +209,7 @@ final_layout_sequence.txt:
 final_layout: final_layout.o final_layout_sequence.txt gcctestdir/ld
 	$(CXXLINK) -Bgcctestdir/ -Wl,--section-ordering-file,final_layout_sequence.txt final_layout.o
 final_layout.stdout: final_layout
-	$(TEST_NM) final_layout > final_layout.stdout
+	$(TEST_NM) -n final_layout > final_layout.stdout
 
 check_PROGRAMS += icf_virtual_function_folding_test
 MOSTLYCLEANFILES += icf_virtual_function_folding_test
@@ -849,8 +849,10 @@ debug_msg.o: debug_msg.cc
 	$(CXXCOMPILE) -O0 -g -c -w -o $@ $(srcdir)/debug_msg.cc
 odr_violation1.o: odr_violation1.cc
 	$(CXXCOMPILE) -O0 -g -c -w -o $@ $(srcdir)/odr_violation1.cc
+# Compile with different optimization flags to check that rearranged
+# instructions don't cause a false positive.
 odr_violation2.o: odr_violation2.cc
-	$(CXXCOMPILE) -O0 -g -c -w -o $@ $(srcdir)/odr_violation2.cc
+	$(CXXCOMPILE) -O2 -g -c -w -o $@ $(srcdir)/odr_violation2.cc
 debug_msg.err: debug_msg.o odr_violation1.o odr_violation2.o gcctestdir/ld
 	@echo $(CXXLINK) -Bgcctestdir/ -Wl,--detect-odr-violations -o debug_msg debug_msg.o odr_violation1.o odr_violation2.o "2>$@"
 	@if $(CXXLINK) -Bgcctestdir/ -Wl,--detect-odr-violations -o debug_msg debug_msg.o odr_violation1.o odr_violation2.o 2>$@; \
@@ -868,7 +870,7 @@ debug_msg.so: debug_msg.cc gcctestdir/ld
 odr_violation1.so: odr_violation1.cc gcctestdir/ld
 	$(CXXCOMPILE) -Bgcctestdir/ -O0 -g -shared -fPIC -w -o $@ $(srcdir)/odr_violation1.cc
 odr_violation2.so: odr_violation2.cc gcctestdir/ld
-	$(CXXCOMPILE) -Bgcctestdir/ -O0 -g -shared -fPIC -w -o $@ $(srcdir)/odr_violation2.cc
+	$(CXXCOMPILE) -Bgcctestdir/ -O2 -g -shared -fPIC -w -o $@ $(srcdir)/odr_violation2.cc
 debug_msg_so.err: debug_msg.so odr_violation1.so odr_violation2.so gcctestdir/ld
 	@echo $(CXXLINK) -Bgcctestdir/ -Wl,--detect-odr-violations -o debug_msg_so debug_msg.so odr_violation1.so odr_violation2.so "2>$@"
 	@if $(CXXLINK) -Bgcctestdir/ -Wl,--detect-odr-violations -o debug_msg_so debug_msg.so odr_violation1.so odr_violation2.so 2>$@; \
@@ -887,7 +889,7 @@ debug_msg_ndebug.so: debug_msg.cc gcctestdir/ld
 odr_violation1_ndebug.so: odr_violation1.cc gcctestdir/ld
 	$(CXXCOMPILE) -Bgcctestdir/ -O0 -g0 -shared -fPIC -w -o $@ $(srcdir)/odr_violation1.cc
 odr_violation2_ndebug.so: odr_violation2.cc gcctestdir/ld
-	$(CXXCOMPILE) -Bgcctestdir/ -O0 -g0 -shared -fPIC -w -o $@ $(srcdir)/odr_violation2.cc
+	$(CXXCOMPILE) -Bgcctestdir/ -O2 -g0 -shared -fPIC -w -o $@ $(srcdir)/odr_violation2.cc
 debug_msg_ndebug.err: debug_msg_ndebug.so odr_violation1_ndebug.so odr_violation2_ndebug.so gcctestdir/ld
 	@echo $(CXXLINK) -Bgcctestdir/ -Wl,--detect-odr-violations -o debug_msg_ndebug debug_msg_ndebug.so odr_violation1_ndebug.so odr_violation2_ndebug.so "2>$@"
 	@if $(CXXLINK) -Bgcctestdir/ -Wl,--detect-odr-violations -o debug_msg_ndebug debug_msg_ndebug.so odr_violation1_ndebug.so odr_violation2_ndebug.so 2>$@; \
@@ -1813,6 +1815,43 @@ memory_test: memory_test.o gcctestdir/ld $(srcdir)/memory_test.t
 memory_test.stdout: memory_test
 	$(TEST_READELF) -lWS  $< > $@
 
+# End-to-end incremental linking tests.
+# Incremental linking is currently supported only on the x86_64 target.
+
+if DEFAULT_TARGET_X86_64
+
+check_PROGRAMS += incremental_test_2
+MOSTLYCLEANFILES += two_file_test_tmp.o
+incremental_test_2: two_file_test_1_v1.o two_file_test_1.o two_file_test_1b.o \
+		    two_file_test_2.o two_file_test_main.o gcctestdir/ld
+	cp -f two_file_test_1_v1.o two_file_test_tmp.o
+	$(CXXLINK) -Wl,--incremental-full -Bgcctestdir/ two_file_test_tmp.o two_file_test_1b.o two_file_test_2.o two_file_test_main.o
+	@sleep 1
+	cp -f two_file_test_1.o two_file_test_tmp.o
+	$(CXXLINK) -Wl,--incremental-update -Bgcctestdir/ two_file_test_tmp.o two_file_test_1b.o two_file_test_2.o two_file_test_main.o
+
+check_PROGRAMS += incremental_test_3
+incremental_test_3: two_file_test_1.o two_file_test_1b_v1.o two_file_test_1b.o \
+		    two_file_test_2.o two_file_test_main.o gcctestdir/ld
+	cp -f two_file_test_1b_v1.o two_file_test_tmp.o
+	$(CXXLINK) -Wl,--incremental-full -Bgcctestdir/ two_file_test_1.o two_file_test_tmp.o two_file_test_2.o two_file_test_main.o
+	@sleep 1
+	cp -f two_file_test_1b.o two_file_test_tmp.o
+	$(CXXLINK) -Wl,--incremental-update -Bgcctestdir/ two_file_test_1.o two_file_test_tmp.o two_file_test_2.o two_file_test_main.o
+
+check_PROGRAMS += incremental_test_4
+MOSTLYCLEANFILES += incremental_test_4.base
+incremental_test_4: two_file_test_1.o two_file_test_1b.o two_file_test_2_v1.o \
+		    two_file_test_2.o two_file_test_main.o gcctestdir/ld
+	cp -f two_file_test_2_v1.o two_file_test_tmp.o
+	$(CXXLINK) -Wl,--incremental-full -Bgcctestdir/ two_file_test_1.o two_file_test_1b.o two_file_test_tmp.o two_file_test_main.o
+	mv -f incremental_test_4 incremental_test_4.base
+	@sleep 1
+	cp -f two_file_test_2.o two_file_test_tmp.o
+	$(CXXLINK) -Wl,--incremental-update,--incremental-base=incremental_test_4.base -Bgcctestdir/ two_file_test_1.o two_file_test_1b.o two_file_test_tmp.o two_file_test_main.o
+
+endif DEFAULT_TARGET_X86_64
+
 endif GCC
 endif NATIVE_LINKER
 
@@ -2161,6 +2200,20 @@ arm_cortex_a8_local_reloc.o: arm_cortex_a8_local_reloc.s
 
 MOSTLYCLEANFILES += arm_cortex_a8_b_cond arm_cortex_a8_b arm_cortex_a8_bl \
 	arm_cortex_a8_blx arm_cortex_a8_local arm_cortex_a8_local_reloc
+
+check_SCRIPTS += arm_exidx_test.sh
+check_DATA += arm_exidx_test.stdout
+
+arm_exidx_test.stdout: arm_exidx_test.so
+	$(TEST_READELF) -S $< > $@
+
+arm_exidx_test.so: arm_exidx_test.o ../ld-new
+	../ld-new -shared -o $@ $<
+
+arm_exidx_test.o: arm_exidx_test.s
+	$(TEST_AS) -o $@ $<
+
+MOSTLYCLEANFILES += arm_exidx_test.so
 
 endif DEFAULT_TARGET_ARM
 

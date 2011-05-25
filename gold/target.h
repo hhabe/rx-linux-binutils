@@ -45,6 +45,8 @@ class Object;
 class Relobj;
 template<int size, bool big_endian>
 class Sized_relobj;
+template<int size, bool big_endian>
+class Sized_relobj_file;
 class Relocatable_relocs;
 template<int size, bool big_endian>
 class Relocate_info;
@@ -54,6 +56,8 @@ template<int size>
 class Sized_symbol;
 class Symbol_table;
 class Output_data;
+template<int size, bool big_endian>
+class Output_data_got;
 class Output_section;
 class Input_objects;
 class Task;
@@ -640,7 +644,7 @@ class Sized_target : public Target
   virtual void
   gc_process_relocs(Symbol_table* symtab,
 		    Layout* layout,
-		    Sized_relobj<size, big_endian>* object,
+		    Sized_relobj_file<size, big_endian>* object,
 		    unsigned int data_shndx,
 		    unsigned int sh_type,
 		    const unsigned char* prelocs,
@@ -665,7 +669,7 @@ class Sized_target : public Target
   virtual void
   scan_relocs(Symbol_table* symtab,
 	      Layout* layout,
-	      Sized_relobj<size, big_endian>* object,
+	      Sized_relobj_file<size, big_endian>* object,
 	      unsigned int data_shndx,
 	      unsigned int sh_type,
 	      const unsigned char* prelocs,
@@ -704,7 +708,7 @@ class Sized_target : public Target
   virtual void
   scan_relocatable_relocs(Symbol_table* symtab,
 			  Layout* layout,
-			  Sized_relobj<size, big_endian>* object,
+			  Sized_relobj_file<size, big_endian>* object,
 			  unsigned int data_shndx,
 			  unsigned int sh_type,
 			  const unsigned char* prelocs,
@@ -793,6 +797,53 @@ class Sized_target : public Target
 
   virtual unsigned int
   plt_entry_size() const
+  { gold_unreachable(); }
+
+  // Create the GOT and PLT sections for an incremental update.
+  // A target needs to implement this to support incremental linking.
+
+  virtual Output_data_got<size, big_endian>*
+  init_got_plt_for_update(Symbol_table*,
+			  Layout*,
+			  unsigned int /* got_count */,
+			  unsigned int /* plt_count */)
+  { gold_unreachable(); }
+
+  // Reserve a GOT entry for a local symbol, and regenerate any
+  // necessary dynamic relocations.
+  virtual void
+  reserve_local_got_entry(unsigned int /* got_index */,
+			  Sized_relobj<size, big_endian>* /* obj */,
+			  unsigned int /* r_sym */,
+			  unsigned int /* got_type */)
+  { gold_unreachable(); }
+
+  // Reserve a GOT entry for a global symbol, and regenerate any
+  // necessary dynamic relocations.
+  virtual void
+  reserve_global_got_entry(unsigned int /* got_index */, Symbol* /* gsym */,
+			   unsigned int /* got_type */)
+  { gold_unreachable(); }
+
+  // Register an existing PLT entry for a global symbol.
+  // A target needs to implement this to support incremental linking.
+
+  virtual void
+  register_global_plt_entry(unsigned int /* plt_index */,
+			    Symbol*)
+  { gold_unreachable(); }
+
+  // Apply an incremental relocation.
+
+  virtual void
+  apply_relocation(const Relocate_info<size, big_endian>* /* relinfo */,
+		   typename elfcpp::Elf_types<size>::Elf_Addr /* r_offset */,
+		   unsigned int /* r_type */,
+		   typename elfcpp::Elf_types<size>::Elf_Swxword /* r_addend */,
+		   const Symbol* /* gsym */,
+		   unsigned char* /* view */,
+		   typename elfcpp::Elf_types<size>::Elf_Addr /* address */,
+		   section_size_type /* view_size */)
   { gold_unreachable(); }
 
  protected:
