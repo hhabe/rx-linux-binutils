@@ -2855,16 +2855,13 @@ rx_elf_set_private_flags (bfd * abfd, flagword flags)
 }
 
 static bfd_boolean no_warn_mismatch = FALSE;
-static bfd_boolean ignore_lma = TRUE;
 
-void bfd_elf32_rx_set_target_flags (bfd_boolean, bfd_boolean);
+void bfd_elf32_rx_set_target_flags (bfd_boolean);
 
 void
-bfd_elf32_rx_set_target_flags (bfd_boolean user_no_warn_mismatch,
-			       bfd_boolean user_ignore_lma)
+bfd_elf32_rx_set_target_flags (bfd_boolean user_no_warn_mismatch)
 {
   no_warn_mismatch = user_no_warn_mismatch;
-  ignore_lma = user_ignore_lma;
 }
 
 /* Merge backend specific data from an object file to the output
@@ -2954,58 +2951,8 @@ elf32_rx_machine (bfd * abfd)
 static bfd_boolean
 rx_elf_object_p (bfd * abfd)
 {
-  int i;
-  unsigned int u;
-  Elf_Internal_Phdr *phdr = elf_tdata (abfd)->phdr;
-  int nphdrs = elf_elfheader (abfd)->e_phnum;
-  sec_ptr bsec;
-
   bfd_default_set_arch_mach (abfd, bfd_arch_rx,
 			     elf32_rx_machine (abfd));
-
-  /* For each PHDR in the object, we must find some section that
-     corresponds (based on matching file offsets) and use its VMA
-     information to reconstruct the p_vaddr field we clobbered when we
-     wrote it out.  */
-  for (i=0; i<nphdrs; i++)
-    {
-      for (u=0; u<elf_tdata(abfd)->num_elf_sections; u++)
-	{
-	  Elf_Internal_Shdr *sec = elf_tdata(abfd)->elf_sect_ptr[u];
-
-	  if (phdr[i].p_offset <= (bfd_vma) sec->sh_offset
-	      && (bfd_vma)sec->sh_offset <= phdr[i].p_offset + (phdr[i].p_filesz - 1))
-	    {
-	      /* Found one!  The difference between the two addresses,
-		 plus the difference between the two file offsets, is
-		 enough information to reconstruct the lma.  */
-
-	      /* Example where they aren't:
-		 PHDR[1] = lma fffc0100 offset 00002010 size 00000100
-		 SEC[6]  = vma 00000050 offset 00002050 size 00000040
-
-		 The correct LMA for the section is fffc0140 + (2050-2010).
-	      */
-
-	      phdr[i].p_vaddr = sec->sh_addr + (sec->sh_offset - phdr[i].p_offset);
-	      break;
-	    }
-	}
-
-      /* We must update the bfd sections as well, so we don't stop
-	 with one match.  */
-      bsec = abfd->sections;
-      while (bsec)
-	{
-	  if (phdr[i].p_vaddr <= bsec->lma
-	      && bsec->vma <= phdr[i].p_vaddr + (phdr[i].p_filesz - 1))
-	    {
-	      bsec->lma = phdr[i].p_paddr + (bsec->vma - phdr[i].p_vaddr);
-	    }
-	  bsec = bsec->next;
-	}
-    }
-
   return TRUE;
 }
  
@@ -3247,6 +3194,8 @@ rx_set_section_contents (bfd *         abfd,
   bfd_size_type scount;
 
 #ifdef DJDEBUG
+  bfd_size_type i;
+
   fprintf (stderr, "\ndj: set %ld %ld to %s  %s e%d sc%d\n",
 	   (long) offset, (long) count, section->name,
 	   bfd_big_endian (abfd) ? "be" : "le",
@@ -3383,24 +3332,22 @@ elf32_rx_modify_program_headers (bfd * abfd ATTRIBUTE_UNUSED,
   phdr = tdata->phdr;
   count = tdata->program_header_size / bed->s->sizeof_phdr;
 
-  if (ignore_lma)
-    for (i = count; i-- != 0;)
-      if (phdr[i].p_type == PT_LOAD)
-	{
-	  /* The Renesas tools expect p_paddr to be zero.  However,
-	     there is no other way to store the writable data in ROM for
-	     startup initialization.  So, we let the linker *think*
-	     we're using paddr and vaddr the "usual" way, but at the
-	     last minute we move the paddr into the vaddr (which is what
-	     the simulator uses) and zero out paddr.  Note that this
-	     does not affect the section headers, just the program
-	     headers.  We hope.  */
+  for (i = count; i-- != 0; )
+    if (phdr[i].p_type == PT_LOAD)
+      {
+	/* The Renesas tools expect p_paddr to be zero.  However,
+	   there is no other way to store the writable data in ROM for
+	   startup initialization.  So, we let the linker *think*
+	   we're using paddr and vaddr the "usual" way, but at the
+	   last minute we move the paddr into the vaddr (which is what
+	   the simulator uses) and zero out paddr.  Note that this
+	   does not affect the section headers, just the program
+	   headers.  We hope.  */
 	  phdr[i].p_vaddr = phdr[i].p_paddr;
-#if 0	  /* If we zero out p_paddr, then the LMA in the section table
+	  /* If we zero out p_paddr, then the LMA in the section table
 	     becomes wrong.  */
-	  phdr[i].p_paddr = 0;
-#endif
-	}
+	  /*phdr[i].p_paddr = 0;*/
+      }
 
   return TRUE;
 }
