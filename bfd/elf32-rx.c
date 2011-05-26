@@ -3008,6 +3008,14 @@ rx_elf_object_p (bfd * abfd)
 
   return TRUE;
 }
+
+static bfd_boolean
+rx_linux_object_p (bfd * abfd)
+{
+  bfd_default_set_arch_mach (abfd, bfd_arch_rx,
+			     elf32_rx_machine (abfd));
+  return TRUE;
+}
  
 
 #ifdef DEBUG
@@ -3446,6 +3454,8 @@ elf32_rx_modify_program_headers (bfd * abfd ATTRIBUTE_UNUSED,
 
 #undef  elf_symbol_leading_char
 #undef  elf_backend_modify_program_headers
+#undef  elf_backend_object_p
+#define elf_backend_object_p			rx_linux_object_p
 
 #undef  elf32_bed
 #define elf32_bed		elf32_rx_lin_bed
